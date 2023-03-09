@@ -2,8 +2,8 @@
 
 基于 Java 的 JSON 语法解析器。该项目仅用于学习交流。
 
-* JsonReader: 使用递归的方式解析 JSON 。
-* JsonReader2: 使用迭代的方式解析 JSON 。
+* JsonReader: 使用迭代的方式解析 JSON 。
+* JsonReader2: 使用递归的方式解析 JSON。
 
 ## Read
 
