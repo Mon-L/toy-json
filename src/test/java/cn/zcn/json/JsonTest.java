@@ -17,7 +17,8 @@ public class JsonTest {
 
     @Test
     public void testRead() {
-        JsonValue json = Json.read("{\"id-abcdefghijklmnopqrstuvwxyz\": \"auth_sbox\", \"isTrue\":true,  \"isFalse\":false,\"isNull\":null,  \"age\":{\"a\":14982},\"isArray\" :  [1,\"234\", true,false,  {\"a\":\"b\"}]}");
+        JsonValue json = Json.read("{\"id-abcdefghijklmnopqrstuvwxyz\": \"auth_sbox\", \"isTrue\":true,  \"isFalse\":false,\"isNull\":null,  \"age\":{\"a\":14982},\"isArray\" :  [1,\"234\", true,false,  {\"a\":\"b\",\"c\":[1,2,3]}]}");
+        System.out.println(json.toString());
         assertThat(json).isInstanceOf(JsonObject.class);
     }
 

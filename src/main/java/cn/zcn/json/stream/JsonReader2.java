@@ -10,14 +10,13 @@ import java.util.LinkedList;
 import java.util.Map;
 
 import static cn.zcn.json.ast.JsonCharacters.*;
-import static cn.zcn.json.ast.JsonCharacters.TAB;
 
 /**
  * Json Reader 2
  *
  * @author zicung
  */
-public class JsonReader2 {
+public class JsonReader2 extends AbstractReader {
 
     private static final int BEGIN_OBJECT = 0x001; // {
     private static final int END_OBJECT = 0x002; // }
@@ -28,61 +27,77 @@ public class JsonReader2 {
     private static final int OBJECT_NAME = 0x040;
     private static final int OBJECT_VALUE = 0x080;
     private static final int ARRAY_VALUE = 0x100;
-    private static final Map<Integer, String> HITS = new HashMap<>();
+    private static final int END_DOCUMENT = 0x200;
+    private static final Map<Integer, String> STATE_HITS = new HashMap<>();
 
     static {
-        HITS.put(BEGIN_OBJECT, "{");
-        HITS.put(END_OBJECT, "}");
-        HITS.put(BEGIN_ARRAY, "[");
-        HITS.put(END_ARRAY, "]");
-        HITS.put(OBJECT_NAME_SEPARATOR, ":");
-        HITS.put(ELEMENT_SEPARATOR, ",");
-        HITS.put(OBJECT_NAME, "pair name");
-        HITS.put(OBJECT_VALUE, "pair value");
-        HITS.put(ARRAY_VALUE, "array element");
+        STATE_HITS.put(BEGIN_OBJECT, "{");
+        STATE_HITS.put(END_OBJECT, "}");
+        STATE_HITS.put(BEGIN_ARRAY, "[");
+        STATE_HITS.put(END_ARRAY, "]");
+        STATE_HITS.put(OBJECT_NAME_SEPARATOR, ":");
+        STATE_HITS.put(ELEMENT_SEPARATOR, ",");
+        STATE_HITS.put(OBJECT_NAME, "Pair Name");
+        STATE_HITS.put(OBJECT_VALUE, "Pair Value");
+        STATE_HITS.put(ARRAY_VALUE, "Array Element");
+        STATE_HITS.put(END_DOCUMENT, "EOF");
     }
 
-    private final Reader reader;
+    /**
+     * 词法遍历器
+     */
     private final JsonVisitor visitor;
+
+    /**
+     * 下一个期待的状态
+     */
     private int nextState;
-    private int current = 0;
+
+    /**
+     * 存储 JsonObject 和 JsonArray。
+     * 当读取到 '['、'{' 时，入栈JsonObject、JsonArray。
+     * 当读取到 '}'、']' 时，出栈。
+     */
     private final Deque<JsonValue> valueDeque = new LinkedList<>();
+
+    /**
+     * 存储 Json Object 的键名。
+     * 当读取到 pair name 时，入栈。
+     * 当读取完 pair value，出栈。
+     */
     private final Deque<String> nameDeque = new LinkedList<>();
 
-    private final char[] readBuffer = new char[12];
-    private int nextPos = 0;
-    private int fill = 0;
-
-    private StringBuilder valueBuffer;
-    private int valueStartPos = -1;
-
-    private int line = 1;
-    private int column = 0;
-
     public JsonReader2(Reader reader, JsonVisitor visitor) {
-        this.reader = reader;
+        super(reader);
         this.visitor = visitor;
     }
 
-    public JsonValue read() throws IOException {
-        boolean shouldReadNext = true;
+    public JsonValue read() {
+        try {
+            return doRead();
+        } catch (IOException e) {
+            throw new JsonException("Failed to read json.", e);
+        }
+    }
+
+    private JsonValue doRead() throws IOException {
+        boolean readNext = true;
         setNextState(BEGIN_OBJECT, BEGIN_ARRAY);
         while (true) {
-            if (shouldReadNext) {
+            if (readNext) {
                 readNext();
             } else {
-                shouldReadNext = true;
+                readNext = true;
             }
 
             while (isWhitespace()) {
                 readNext();
             }
 
-            if (current == -1) {
-                break;
-            }
-
             switch (current) {
+                case -1:
+                    checkState(END_DOCUMENT);
+                    return visitor.getCurrent();
                 case JSON_OBJECT_BEGIN:
                     enterObject();
                     break;
@@ -106,12 +121,15 @@ public class JsonReader2 {
                     break;
                 case 't':
                     readTrue();
+                    readNext = false;
                     break;
                 case 'f':
                     readFalse();
+                    readNext = false;
                     break;
                 case 'n':
                     readNull();
+                    readNext = false;
                     break;
                 case '0':
                 case '1':
@@ -124,36 +142,26 @@ public class JsonReader2 {
                 case '8':
                 case '9':
                     readNumber();
-                    shouldReadNext = false;
+                    readNext = false;
                     break;
                 default:
                     throw new JsonException("Unsupported json value prefix: " + (char) current);
             }
         }
-
-        if (valueDeque.size() > 0) {
-            if (valueDeque.peek().isObject()) {
-                throwUnexpectedException(JSON_OBJECT_END);
-            } else {
-                throwUnexpectedException(JSON_ARRAY_END);
-            }
-        }
-
-        return visitor.getCurrent();
     }
 
     private void enterColon() {
         checkState(OBJECT_NAME_SEPARATOR);
-        setNextState(OBJECT_VALUE, ARRAY_VALUE, BEGIN_OBJECT, BEGIN_ARRAY);
+        setNextState(OBJECT_VALUE, BEGIN_OBJECT, BEGIN_ARRAY);
     }
 
     private void enterComma() {
         if (hasState(END_ARRAY)) {
-            setNextState(ARRAY_VALUE);
+            setNextState(ARRAY_VALUE, BEGIN_OBJECT, BEGIN_ARRAY);
         } else if (hasState(END_OBJECT)) {
             setNextState(OBJECT_NAME);
         } else {
-            throwUnexpectedException();
+            throwUnexpectedStateException();
         }
     }
 
@@ -167,7 +175,7 @@ public class JsonReader2 {
     private void enterArray() {
         checkState(BEGIN_ARRAY);
         valueDeque.addLast(visitor.startArray());
-        setNextState(END_ARRAY, ARRAY_VALUE);
+        setNextState(END_ARRAY, ARRAY_VALUE, BEGIN_OBJECT);
     }
 
     private void enterObject() {
@@ -178,21 +186,24 @@ public class JsonReader2 {
 
     public void exitObject() {
         checkState(END_OBJECT);
-        JsonObject obj = valueDeque.pollLast().asObject();
+        JsonObject obj = (JsonObject) valueDeque.pollLast();
         visitor.endObject(obj);
         endCollection();
     }
 
     private void endCollection() {
         if (valueDeque.size() > 0) {
-            JsonValue peek = valueDeque.peek();
+            JsonValue peek = valueDeque.peekLast();
             if (peek.isObject()) {
                 visitor.endObjectValue(peek.asObject(), nameDeque.pollLast());
+                setNextState(END_OBJECT, ELEMENT_SEPARATOR);
             } else {
                 visitor.endArrayElement(peek.asArray());
+                setNextState(END_ARRAY, ELEMENT_SEPARATOR);
             }
+        } else {
+            setNextState(END_DOCUMENT);
         }
-        setNextState(END_ARRAY, END_OBJECT, ELEMENT_SEPARATOR);
     }
 
     private void readTrue() throws IOException {
@@ -207,7 +218,7 @@ public class JsonReader2 {
             visitor.endArrayElement((JsonArray) valueDeque.peekLast());
             setNextState(END_ARRAY, ELEMENT_SEPARATOR);
         } else {
-            throwUnexpectedException();
+            throwUnexpectedStateException();
         }
     }
 
@@ -223,7 +234,7 @@ public class JsonReader2 {
             visitor.endArrayElement((JsonArray) valueDeque.peekLast());
             setNextState(END_ARRAY, ELEMENT_SEPARATOR);
         } else {
-            throwUnexpectedException();
+            throwUnexpectedStateException();
         }
     }
 
@@ -239,7 +250,7 @@ public class JsonReader2 {
             visitor.endArrayElement((JsonArray) valueDeque.peekLast());
             setNextState(END_ARRAY, ELEMENT_SEPARATOR);
         } else {
-            throwUnexpectedException();
+            throwUnexpectedStateException();
         }
     }
 
@@ -255,7 +266,7 @@ public class JsonReader2 {
             visitor.endArrayElement((JsonArray) valueDeque.peekLast());
             setNextState(END_ARRAY, ELEMENT_SEPARATOR);
         } else {
-            throwUnexpectedException();
+            throwUnexpectedStateException();
         }
     }
 
@@ -277,7 +288,7 @@ public class JsonReader2 {
             visitor.endArrayElement((JsonArray) valueDeque.peekLast());
             setNextState(END_ARRAY, ELEMENT_SEPARATOR);
         } else {
-            throwUnexpectedException();
+            throwUnexpectedStateException();
         }
     }
 
@@ -314,39 +325,37 @@ public class JsonReader2 {
     private void readNullInternal() throws IOException {
         visitor.startNull();
         readNext();
-        isEqualsOrThrow('u', true);
-        isEqualsOrThrow('l', true);
-        isEqualsOrThrow('l', false);
+        isEqualsOrThrow('u');
+        isEqualsOrThrow('l');
+        isEqualsOrThrow('l');
         visitor.endNull();
     }
 
     private void readTrueInternal() throws IOException {
         visitor.startBool();
         readNext();
-        isEqualsOrThrow('r', true);
-        isEqualsOrThrow('u', true);
-        isEqualsOrThrow('e', false);
+        isEqualsOrThrow('r');
+        isEqualsOrThrow('u');
+        isEqualsOrThrow('e');
         visitor.endBool(true);
     }
 
     private void readFalseInternal() throws IOException {
         visitor.startBool();
         readNext();
-        isEqualsOrThrow('a', true);
-        isEqualsOrThrow('l', true);
-        isEqualsOrThrow('s', true);
-        isEqualsOrThrow('e', false);
+        isEqualsOrThrow('a');
+        isEqualsOrThrow('l');
+        isEqualsOrThrow('s');
+        isEqualsOrThrow('e');
         visitor.endBool(false);
     }
 
-    private void isEqualsOrThrow(char excepted, boolean next) throws IOException {
-        if (current != excepted) {
-            throwUnexpectedException(excepted);
+    private void isEqualsOrThrow(char expected) throws IOException {
+        if (current != expected) {
+            throw new UnexpectedException(expected, current, line, column);
         }
 
-        if (next) {
-            readNext();
-        }
+        readNext();
     }
 
     private void setNextState(int... newState) {
@@ -367,82 +376,20 @@ public class JsonReader2 {
             }
         }
 
-        throwUnexpectedException();
+        throwUnexpectedStateException();
     }
 
-    private void readNext() throws IOException {
-        if (nextPos == fill) {
-            if (valueStartPos != -1) {
-                valueBuffer.append(readBuffer, valueStartPos, fill - valueStartPos);
-                valueStartPos = 0;
-            }
-
-            //读取字符到缓存中
-            fill = reader.read(readBuffer, 0, readBuffer.length);
-            nextPos = 0;
-
-            if (fill == -1) {
-                current = -1;
-                nextPos++;
-                return;
-            }
-        }
-
-        current = readBuffer[nextPos++];
-        column++;
-
-        if (current == NEW_LINE) {
-            line++;
-            column = 0;
-        }
-    }
-
-    private boolean isWhitespace() {
-        return current == WHITE_SPACE || current == NEW_LINE || current == LINE_FEED || current == TAB;
-    }
-
-    private void openValueBuffer() {
-        if (valueBuffer == null) {
-            valueBuffer = new StringBuilder();
-        }
-
-        valueStartPos = nextPos - 1;
-    }
-
-    private String closeValueBuffer() {
-        if (valueBuffer.length() > 0) {
-            valueBuffer.append(readBuffer, valueStartPos, nextPos - valueStartPos - 1);
-
-            String value = valueBuffer.toString();
-            valueBuffer.setLength(0);
-            valueStartPos = -1;
-            return value;
-        }
-
-        String val = new String(readBuffer, valueStartPos, nextPos - valueStartPos - 1);
-        valueStartPos = -1;
-        return val;
-    }
-
-    private void throwUnexpectedException(char excepted) {
-        String msg = "Excepted \"" + excepted +
-                "\" but got \"" + (char) current + "\"" +
-                ". line: " + line + ", column: " + column;
-
-        throw new JsonException(msg);
-    }
-
-    private void throwUnexpectedException() {
+    private void throwUnexpectedStateException() {
         StringBuilder s = new StringBuilder("Expected: ");
         int e = nextState;
         while (e > 0) {
-            int i = Integer.highestOneBit(e);
-            s.append("\"").append(HITS.get(i)).append("\"").append(" , ");
-            e -= i;
+            int highestBit = Integer.highestOneBit(e);
+            s.append("\"").append(STATE_HITS.get(highestBit)).append("\"").append(" , ");
+            e -= highestBit;
         }
 
-        s.append("but got: ").append("\"").append((char) current).append("\". line: ")
-                .append(line).append(", column: ").append(column);
+        s.append("but got: ").append("\"").append((char) current).append("\".Line: ")
+                .append(line).append(", Column: ").append(column);
 
         throw new JsonException(s.toString());
     }

@@ -12,63 +12,28 @@ import static cn.zcn.json.ast.JsonCharacters.*;
  *
  * @author zicung
  */
-public class JsonReader {
-
-    /**
-     * Json content stream
-     */
-    private final Reader reader;
+public class JsonReader extends AbstractReader {
 
     /**
      * 词法遍历器
      */
     private final JsonVisitor visitor;
 
-    /**
-     * 字符缓存，用于缓存从 {@code Reader} 读取的 chars
-     */
-    private char[] readBuffer;
-
-    /**
-     * 下一个将要读取的 char 的索引位置
-     */
-    private int nextPos;
-
-    /**
-     * {@code readBuffer} 缓存的字符数量
-     */
-    private int fillSize;
-
-    /**
-     * 当前读取的 char
-     */
-    private int current;
-
-    /**
-     * Json Value buffer。当在读取 Json Value 时读取到了 {@code readBuffer} 的尾部时，当前 Json Value 尚未读取完成时，将内容缓存到 {@code valueBuffer}
-     */
-    private StringBuilder valueBuffer;
-
-    /**
-     * 标识当前读取的 Json Value 的开始索引
-     */
-    private int valueStartPos;
-
     public JsonReader(Reader reader, JsonVisitor visitor) {
-        this.reader = reader;
+        super(reader);
         this.visitor = visitor;
     }
 
     public JsonValue read() {
         try {
             nextPos = 0;
-            readBuffer = new char[512];
             current = 0;
             valueStartPos = -1;
 
-            readNext(true);
+            readNext();
+            skipWhiteSpace();
 
-            if (fillSize == -1) {
+            if (fill == -1) {
                 throw new JsonException("Empty json string.");
             } else if (current == JSON_OBJECT_BEGIN) {
                 readJsonObject();
@@ -79,7 +44,7 @@ public class JsonReader {
             }
 
             skipWhiteSpace();
-            if (fillSize != -1) {
+            if (fill != -1) {
                 throw new JsonException("Invalid json ending.");
             }
 
@@ -129,16 +94,20 @@ public class JsonReader {
     private void readJsonObject() throws IOException {
         JsonObject jsonObject = visitor.startObject();
 
-        readNext(true);
+        readNext();
+        skipWhiteSpace();
+
         if (current == JSON_OBJECT_END) {
             visitor.endObject(jsonObject);
-            readNext(true);
+            readNext();
+            skipWhiteSpace();
             return;
         }
 
         do {
             skipWhiteSpace();
-            readNext(true);
+            readNext();
+            skipWhiteSpace();
 
             visitor.startObjectName(jsonObject);
             String name = readName();
@@ -150,6 +119,7 @@ public class JsonReader {
             visitor.startObjectValue(jsonObject, name);
             readValue();
             visitor.endObjectValue(jsonObject, name);
+            skipWhiteSpace();
         } while (isEquals(JSON_VALUE_SEPARATOR));
 
         isEqualsOrThrow(JSON_OBJECT_END);
@@ -159,12 +129,14 @@ public class JsonReader {
     private void readJsonArray() throws IOException {
         JsonArray array = visitor.startArray();
 
-        readNext(true);
+        readNext();
+        skipWhiteSpace();
         do {
             skipWhiteSpace();
             visitor.startArrayElement(array);
             readValue();
             visitor.endArrayElement(array);
+            skipWhiteSpace();
         } while (isEquals(JSON_VALUE_SEPARATOR));
 
         isEqualsOrThrow(JSON_ARRAY_END);
@@ -175,19 +147,20 @@ public class JsonReader {
      * 读取 json string value。读取完后会读下一个字符（跳过空白字符）。
      */
     private void readString() throws IOException {
-        readNext(false);
+        readNext();
 
-        startValueBuffer();
+        openValueBuffer();
         visitor.startString();
 
         //TODO 处理 "\"、"unicode"
         while (current != JSON_QUOTATION_MARK && current != -1) {
-            readNext(false);
+            readNext();
         }
-        String value = endValueBuffer();
+        String value = closeValueBuffer();
         visitor.endString(value);
 
-        readNext(true);
+        readNext();
+        skipWhiteSpace();
     }
 
     /**
@@ -195,7 +168,7 @@ public class JsonReader {
      */
     private void readNull() throws IOException {
         visitor.startNull();
-        readNext(false);
+        readNext();
         isEqualsOrThrow('u');
         isEqualsOrThrow('l');
         isEqualsOrThrow('l');
@@ -209,7 +182,7 @@ public class JsonReader {
      */
     private void readFalse() throws IOException {
         visitor.startBool();
-        readNext(false);
+        readNext();
         isEqualsOrThrow('a');
         isEqualsOrThrow('l');
         isEqualsOrThrow('s');
@@ -224,7 +197,7 @@ public class JsonReader {
      */
     private void readTrue() throws IOException {
         visitor.startBool();
-        readNext(false);
+        readNext();
         isEqualsOrThrow('r');
         isEqualsOrThrow('u');
         isEqualsOrThrow('e');
@@ -238,11 +211,11 @@ public class JsonReader {
      */
     private void readNumber() throws IOException {
         visitor.startNumber();
-        startValueBuffer();
+        openValueBuffer();
         while (current >= '0' && current <= '9') {
-            readNext(false);
+            readNext();
         }
-        String num = endValueBuffer();
+        String num = closeValueBuffer();
         visitor.endNumber(num);
 
         skipWhiteSpace();
@@ -252,39 +225,20 @@ public class JsonReader {
      * 读取 json member name，读取完后会读取 name 的下一个字符（跳过空白字符）。
      */
     private String readName() throws IOException {
-        startValueBuffer();
+        openValueBuffer();
         while (current != JSON_QUOTATION_MARK && current != -1) {
-            readNext(false);
+            readNext();
         }
-        String name = endValueBuffer();
-        readNext(true);
+        String name = closeValueBuffer();
+        readNext();
+        skipWhiteSpace();
         return name;
     }
 
     private void skipWhiteSpace() throws IOException {
-        while (current == WHITE_SPACE || current == NEW_LINE || current == LINE_FEED || current == TAB) {
-            readNext(false);
+        while (isWhitespace()) {
+            readNext();
         }
-    }
-
-    private void startValueBuffer() {
-        if (valueBuffer == null) {
-            valueBuffer = new StringBuilder();
-        }
-
-        valueStartPos = nextPos - 1;
-    }
-
-    private String endValueBuffer() {
-        if (valueBuffer.length() > 0) {
-            valueBuffer.append(readBuffer, valueStartPos, nextPos - valueStartPos - 1);
-
-            String value = valueBuffer.toString();
-            valueBuffer.setLength(0);
-            return value;
-        }
-
-        return new String(readBuffer, valueStartPos, nextPos - valueStartPos - 1);
     }
 
     /**
@@ -297,51 +251,19 @@ public class JsonReader {
             return false;
         }
 
-        readNext(false);
+        readNext();
         return true;
     }
 
     /**
-     * 判断 {@code current} 与 {@code required} 是否相等，如果不相等抛出异常。
+     * 判断 {@code current} 与 {@code expected} 是否相等，如果不相等抛出异常。
      * 如果相等会读取下一个字符。
      */
-    private void isEqualsOrThrow(char excepted) throws IOException {
-        if (current != excepted) {
-            throwUnexpectedCharException(excepted);
+    private void isEqualsOrThrow(char expected) throws IOException {
+        if (current != expected) {
+            throw new UnexpectedException(expected, current, line, column);
         }
 
-        readNext(false);
-    }
-
-    /**
-     * 读取下一个字符
-     */
-    private void readNext(boolean skipWhitespace) throws IOException {
-        if (nextPos == fillSize) {
-            if (valueStartPos != -1) {
-                valueBuffer.append(readBuffer, valueStartPos, fillSize - valueStartPos);
-                valueStartPos = 0;
-            }
-
-            //读取字符到缓存中
-            fillSize = reader.read(readBuffer, 0, readBuffer.length);
-            nextPos = 0;
-
-            if (fillSize == -1) {
-                current = -1;
-                nextPos++;
-                return;
-            }
-        }
-
-        current = readBuffer[nextPos++];
-
-        if (skipWhitespace) {
-            skipWhiteSpace();
-        }
-    }
-
-    private void throwUnexpectedCharException(char expected) {
-        throw new JsonException("Expected " + expected + " but got " + (char) current);
+        readNext();
     }
 }

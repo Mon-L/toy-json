@@ -3,6 +3,7 @@ package cn.zcn.json;
 import cn.zcn.json.ast.*;
 import cn.zcn.json.stream.DefaultJsonVisitor;
 import cn.zcn.json.stream.JsonReader;
+import cn.zcn.json.stream.JsonReader2;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
