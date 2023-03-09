@@ -1,6 +1,5 @@
 package cn.zcn.json.ast;
 
-import cn.zcn.json.Json;
 import cn.zcn.json.stream.JsonWriter;
 
 import java.io.StringWriter;
@@ -200,7 +199,7 @@ public class JsonValue {
     public String toString() {
         StringWriter out = new StringWriter();
         JsonWriter writer = new JsonWriter(out);
-        Json.write(writer, this);
+        writer.write(this);
         return out.toString();
     }
 }

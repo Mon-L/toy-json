@@ -1,10 +1,6 @@
 package cn.zcn.json.stream;
 
-import cn.zcn.json.Json;
-import cn.zcn.json.ast.JsonArray;
-import cn.zcn.json.ast.JsonObject;
-import cn.zcn.json.ast.JsonPrimitive;
-import cn.zcn.json.ast.JsonValue;
+import cn.zcn.json.ast.*;
 
 import java.io.IOException;
 import java.io.Writer;
@@ -48,7 +44,21 @@ public class JsonWriter {
         this.indent = indent;
     }
 
-    public void writePrimitive(JsonPrimitive json) throws IOException {
+    public void write(JsonValue json) {
+        try {
+            if (json instanceof JsonPrimitive) {
+                writePrimitive(json.asPrimitive());
+            } else if (json instanceof JsonObject) {
+                writeObject(json.asObject());
+            } else {
+                writeArray(json.asArray());
+            }
+        } catch (IOException e) {
+            throw new JsonException("Failed to write json.", e);
+        }
+    }
+
+    private void writePrimitive(JsonPrimitive json) throws IOException {
         if (json.isNull()) {
             writeNull();
         } else if (json.isString()) {
@@ -60,7 +70,7 @@ public class JsonWriter {
         }
     }
 
-    public void writeObject(JsonObject json) throws IOException {
+    private void writeObject(JsonObject json) throws IOException {
         out.write(JSON_OBJECT_BEGIN);
 
         if (json.size() > 0) {
@@ -69,18 +79,16 @@ public class JsonWriter {
             writeIndent();
 
             Iterator<String> iter = json.keySet().iterator();
-            while (true) {
+            while (iter.hasNext()) {
                 String name = iter.next();
-                JsonValue value = json.get(name);
-
                 writeString(name);
-                writeMemberSeparator();
-                Json.write(this, value);
+                writePairSeparator();
+                JsonValue value = json.get(name);
+                write(value);
 
-                if (!iter.hasNext()) {
-                    break;
+                if (iter.hasNext()) {
+                    writeElementSeparator();
                 }
-                writeValueSeparator();
             }
 
             decreaseDepth();
@@ -91,7 +99,7 @@ public class JsonWriter {
         out.write(JSON_OBJECT_END);
     }
 
-    public void writeArray(JsonArray json) throws IOException {
+    private void writeArray(JsonArray json) throws IOException {
         out.write(JSON_ARRAY_BEGIN);
 
         if (json.size() > 0) {
@@ -100,12 +108,11 @@ public class JsonWriter {
             writeIndent();
 
             Iterator<JsonValue> iter = json.iterator();
-            while (true) {
-                Json.write(this, iter.next());
-                if (!iter.hasNext()) {
-                    break;
+            while (iter.hasNext()) {
+                write(iter.next());
+                if (iter.hasNext()) {
+                    writeElementSeparator();
                 }
-                writeValueSeparator();
             }
 
             decreaseDepth();
@@ -120,17 +127,17 @@ public class JsonWriter {
         out.write(JSON_NULL);
     }
 
-    public void writeString(String value) throws IOException {
+    private void writeString(String value) throws IOException {
         out.write(JSON_QUOTATION_MARK);
         out.write(value);
         out.write(JSON_QUOTATION_MARK);
     }
 
-    public void writeBool(Boolean value) throws IOException {
+    private void writeBool(Boolean value) throws IOException {
         out.write(value.toString());
     }
 
-    public void writeNumber(Number number) throws IOException {
+    private void writeNumber(Number number) throws IOException {
         if (number instanceof Double) {
             if (((Double) number).isInfinite() || ((Double) number).isNaN()) {
                 out.write(JSON_NULL);
@@ -144,7 +151,7 @@ public class JsonWriter {
         }
     }
 
-    private void writeMemberSeparator() throws IOException {
+    private void writePairSeparator() throws IOException {
         if (isCompressed) {
             out.write(JSON_NAME_SEPARATOR);
         } else {
@@ -153,7 +160,7 @@ public class JsonWriter {
         }
     }
 
-    private void writeValueSeparator() throws IOException {
+    private void writeElementSeparator() throws IOException {
         out.write(JSON_VALUE_SEPARATOR);
         writeNewLine();
         writeIndent();

@@ -15,13 +15,17 @@ JsonObject jsonObject = json.asObject();
 ## Write
 
 ``` java
+
+//create json object
 JsonObject json = new JsonObject();
 json.set("foo", "bar");
 
+//write json object
 StringWriter writer = new StringWriter();
 JsonWriter jsonWriter = new JsonWriter(writer)；
-jsonWriter.writeObject(json);
+jsonWriter.write(json);
 
+//get json
 String jsonString = writer.toString();
 ```
 

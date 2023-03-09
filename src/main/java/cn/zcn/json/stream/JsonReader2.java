@@ -44,7 +44,7 @@ public class JsonReader2 {
 
     private final Reader reader;
     private final JsonVisitor visitor;
-    private int expectedStatus;
+    private int nextState;
     private int current = 0;
     private final Deque<JsonValue> valueDeque = new LinkedList<>();
     private final Deque<String> nameDeque = new LinkedList<>();
@@ -66,7 +66,7 @@ public class JsonReader2 {
 
     public JsonValue read() throws IOException {
         boolean shouldReadNext = true;
-        setExpectedStatus(BEGIN_OBJECT, BEGIN_ARRAY);
+        setNextState(BEGIN_OBJECT, BEGIN_ARRAY);
         while (true) {
             if (shouldReadNext) {
                 readNext();
@@ -143,41 +143,41 @@ public class JsonReader2 {
     }
 
     private void enterColon() {
-        checkStatus(OBJECT_NAME_SEPARATOR);
-        setExpectedStatus(OBJECT_VALUE, ARRAY_VALUE, BEGIN_OBJECT, BEGIN_ARRAY);
+        checkState(OBJECT_NAME_SEPARATOR);
+        setNextState(OBJECT_VALUE, ARRAY_VALUE, BEGIN_OBJECT, BEGIN_ARRAY);
     }
 
     private void enterComma() {
-        if (hasExpectedStatus(END_ARRAY)) {
-            setExpectedStatus(ARRAY_VALUE);
-        } else if (hasExpectedStatus(END_OBJECT)) {
-            setExpectedStatus(OBJECT_NAME);
+        if (hasState(END_ARRAY)) {
+            setNextState(ARRAY_VALUE);
+        } else if (hasState(END_OBJECT)) {
+            setNextState(OBJECT_NAME);
         } else {
             throwUnexpectedException();
         }
     }
 
     private void exitArray() {
-        checkStatus(END_ARRAY);
+        checkState(END_ARRAY);
         JsonArray array = (JsonArray) valueDeque.pollLast();
         visitor.endArray(array);
         endCollection();
     }
 
     private void enterArray() {
-        checkStatus(BEGIN_ARRAY);
+        checkState(BEGIN_ARRAY);
         valueDeque.addLast(visitor.startArray());
-        setExpectedStatus(END_ARRAY, ARRAY_VALUE);
+        setNextState(END_ARRAY, ARRAY_VALUE);
     }
 
     private void enterObject() {
-        checkStatus(BEGIN_OBJECT);
+        checkState(BEGIN_OBJECT);
         valueDeque.addLast(visitor.startObject());
-        setExpectedStatus(END_OBJECT, OBJECT_NAME);
+        setNextState(END_OBJECT, OBJECT_NAME);
     }
 
     public void exitObject() {
-        checkStatus(END_OBJECT);
+        checkState(END_OBJECT);
         JsonObject obj = valueDeque.pollLast().asObject();
         visitor.endObject(obj);
         endCollection();
@@ -192,90 +192,90 @@ public class JsonReader2 {
                 visitor.endArrayElement(peek.asArray());
             }
         }
-        setExpectedStatus(END_ARRAY, END_OBJECT, ELEMENT_SEPARATOR);
+        setNextState(END_ARRAY, END_OBJECT, ELEMENT_SEPARATOR);
     }
 
     private void readTrue() throws IOException {
-        if (hasExpectedStatus(OBJECT_VALUE)) {
+        if (hasState(OBJECT_VALUE)) {
             visitor.startObjectValue((JsonObject) valueDeque.peekLast(), nameDeque.peekLast());
             readTrueInternal();
             visitor.endObjectValue((JsonObject) valueDeque.peekLast(), nameDeque.pollLast());
-            setExpectedStatus(END_OBJECT, ELEMENT_SEPARATOR);
-        } else if (hasExpectedStatus(ARRAY_VALUE)) {
+            setNextState(END_OBJECT, ELEMENT_SEPARATOR);
+        } else if (hasState(ARRAY_VALUE)) {
             visitor.startArrayElement((JsonArray) valueDeque.peekLast());
             readTrueInternal();
             visitor.endArrayElement((JsonArray) valueDeque.peekLast());
-            setExpectedStatus(END_ARRAY, ELEMENT_SEPARATOR);
+            setNextState(END_ARRAY, ELEMENT_SEPARATOR);
         } else {
             throwUnexpectedException();
         }
     }
 
     private void readFalse() throws IOException {
-        if (hasExpectedStatus(OBJECT_VALUE)) {
+        if (hasState(OBJECT_VALUE)) {
             visitor.startObjectValue((JsonObject) valueDeque.peekLast(), nameDeque.peekLast());
             readFalseInternal();
             visitor.endObjectValue((JsonObject) valueDeque.peekLast(), nameDeque.pollLast());
-            setExpectedStatus(END_OBJECT, ELEMENT_SEPARATOR);
-        } else if (hasExpectedStatus(ARRAY_VALUE)) {
+            setNextState(END_OBJECT, ELEMENT_SEPARATOR);
+        } else if (hasState(ARRAY_VALUE)) {
             visitor.startArrayElement((JsonArray) valueDeque.peekLast());
             readFalseInternal();
             visitor.endArrayElement((JsonArray) valueDeque.peekLast());
-            setExpectedStatus(END_ARRAY, ELEMENT_SEPARATOR);
+            setNextState(END_ARRAY, ELEMENT_SEPARATOR);
         } else {
             throwUnexpectedException();
         }
     }
 
     private void readNull() throws IOException {
-        if (hasExpectedStatus(OBJECT_VALUE)) {
+        if (hasState(OBJECT_VALUE)) {
             visitor.startObjectValue((JsonObject) valueDeque.peekLast(), nameDeque.peekLast());
             readNullInternal();
             visitor.endObjectValue((JsonObject) valueDeque.peekLast(), nameDeque.pollLast());
-            setExpectedStatus(END_OBJECT, ELEMENT_SEPARATOR);
-        } else if (hasExpectedStatus(ARRAY_VALUE)) {
+            setNextState(END_OBJECT, ELEMENT_SEPARATOR);
+        } else if (hasState(ARRAY_VALUE)) {
             visitor.startArrayElement((JsonArray) valueDeque.peekLast());
             readNullInternal();
             visitor.endArrayElement((JsonArray) valueDeque.peekLast());
-            setExpectedStatus(END_ARRAY, ELEMENT_SEPARATOR);
+            setNextState(END_ARRAY, ELEMENT_SEPARATOR);
         } else {
             throwUnexpectedException();
         }
     }
 
     private void readNumber() throws IOException {
-        if (hasExpectedStatus(OBJECT_VALUE)) {
+        if (hasState(OBJECT_VALUE)) {
             visitor.startObjectValue((JsonObject) valueDeque.peekLast(), nameDeque.peekLast());
             readNumberInternal();
             visitor.endObjectValue((JsonObject) valueDeque.peekLast(), nameDeque.pollLast());
-            setExpectedStatus(END_OBJECT, ELEMENT_SEPARATOR);
-        } else if (hasExpectedStatus(ARRAY_VALUE)) {
+            setNextState(END_OBJECT, ELEMENT_SEPARATOR);
+        } else if (hasState(ARRAY_VALUE)) {
             visitor.startArrayElement((JsonArray) valueDeque.peekLast());
             readNumberInternal();
             visitor.endArrayElement((JsonArray) valueDeque.peekLast());
-            setExpectedStatus(END_ARRAY, ELEMENT_SEPARATOR);
+            setNextState(END_ARRAY, ELEMENT_SEPARATOR);
         } else {
             throwUnexpectedException();
         }
     }
 
     private void readString() throws IOException {
-        if (hasExpectedStatus(OBJECT_NAME)) {
+        if (hasState(OBJECT_NAME)) {
             visitor.startObjectName((JsonObject) valueDeque.peekLast());
             String name = readName();
             visitor.endObjectName((JsonObject) valueDeque.peekLast(), name);
             nameDeque.addLast(name);
-            setExpectedStatus(OBJECT_NAME_SEPARATOR);
-        } else if (hasExpectedStatus(OBJECT_VALUE)) {
+            setNextState(OBJECT_NAME_SEPARATOR);
+        } else if (hasState(OBJECT_VALUE)) {
             visitor.startObjectValue((JsonObject) valueDeque.peekLast(), nameDeque.peekLast());
             readStringInternal();
             visitor.endObjectValue((JsonObject) valueDeque.peekLast(), nameDeque.pollLast());
-            setExpectedStatus(END_OBJECT, ELEMENT_SEPARATOR);
-        } else if (hasExpectedStatus(ARRAY_VALUE)) {
+            setNextState(END_OBJECT, ELEMENT_SEPARATOR);
+        } else if (hasState(ARRAY_VALUE)) {
             visitor.startArrayElement((JsonArray) valueDeque.peekLast());
             readStringInternal();
             visitor.endArrayElement((JsonArray) valueDeque.peekLast());
-            setExpectedStatus(END_ARRAY, ELEMENT_SEPARATOR);
+            setNextState(END_ARRAY, ELEMENT_SEPARATOR);
         } else {
             throwUnexpectedException();
         }
@@ -349,20 +349,20 @@ public class JsonReader2 {
         }
     }
 
-    private void setExpectedStatus(int... excepted) {
-        expectedStatus = 0;
-        for (int e : excepted) {
-            expectedStatus |= e;
+    private void setNextState(int... newState) {
+        this.nextState = 0;
+        for (int s : newState) {
+            this.nextState |= s;
         }
     }
 
-    private boolean hasExpectedStatus(int actual) {
-        return (expectedStatus & actual) != 0;
+    private boolean hasState(int actual) {
+        return (nextState & actual) != 0;
     }
 
-    private void checkStatus(int... actual) {
+    private void checkState(int... actual) {
         for (int a : actual) {
-            if (hasExpectedStatus(a)) {
+            if (hasState(a)) {
                 return;
             }
         }
@@ -434,7 +434,7 @@ public class JsonReader2 {
 
     private void throwUnexpectedException() {
         StringBuilder s = new StringBuilder("Expected: ");
-        int e = expectedStatus;
+        int e = nextState;
         while (e > 0) {
             int i = Integer.highestOneBit(e);
             s.append("\"").append(HITS.get(i)).append("\"").append(" , ");

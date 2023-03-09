@@ -3,7 +3,10 @@ package cn.zcn.json;
 import cn.zcn.json.ast.JsonException;
 import cn.zcn.json.ast.JsonObject;
 import cn.zcn.json.ast.JsonValue;
+import cn.zcn.json.stream.JsonWriter;
 import org.junit.Test;
+
+import java.io.StringWriter;
 
 import static org.assertj.core.api.Assertions.*;
 
