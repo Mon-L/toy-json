@@ -1,9 +1,8 @@
 package cn.zcn.json;
 
 import cn.zcn.json.ast.*;
-import cn.zcn.json.stream.DefaultJsonVisitor;
+import cn.zcn.json.stream.DefaultJsonListener;
 import cn.zcn.json.stream.JsonReader;
-import cn.zcn.json.stream.JsonReader2;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -24,6 +23,6 @@ public class Json {
     }
 
     private static JsonValue read(Reader reader) {
-        return new JsonReader(reader, new DefaultJsonVisitor()).read();
+        return new JsonReader(reader, new DefaultJsonListener()).read();
     }
 }

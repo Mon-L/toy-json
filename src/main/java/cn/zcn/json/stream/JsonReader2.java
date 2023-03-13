@@ -8,30 +8,19 @@ import java.io.Reader;
 import static cn.zcn.json.ast.JsonCharacters.*;
 
 /**
- * Json Reader
+ * 使用递归的方式解析 JSON
  *
  * @author zicung
  */
 public class JsonReader2 extends AbstractReader {
 
-    /**
-     * 词法遍历器
-     */
-    private final JsonVisitor visitor;
-
-    public JsonReader2(Reader reader, JsonVisitor visitor) {
-        super(reader);
-        this.visitor = visitor;
+    public JsonReader2(Reader reader, JsonListener listener) {
+        super(reader, listener);
     }
 
     public JsonValue read() {
         try {
-            nextPos = 0;
-            current = 0;
-            valueStartPos = -1;
-
-            readNext();
-            skipWhiteSpace();
+            readNextAndSkip();
 
             if (fill == -1) {
                 throw new JsonException("Empty json string.");
@@ -48,7 +37,7 @@ public class JsonReader2 extends AbstractReader {
                 throw new JsonException("Invalid json ending.");
             }
 
-            return visitor.getCurrent();
+            return listener.getRoot();
         } catch (IOException e) {
             throw new JsonException("Failed to read json.", e);
         }
@@ -63,16 +52,17 @@ public class JsonReader2 extends AbstractReader {
                 readJsonArray();
                 break;
             case JSON_QUOTATION_MARK:
-                readString();
+                readStringInternal();
+                readNextAndSkip();
                 break;
             case 't':
-                readTrue();
+                readTrueInternal();
                 break;
             case 'f':
-                readFalse();
+                readFalseInternal();
                 break;
             case 'n':
-                readNull();
+                readNullInternal();
                 break;
             case '0':
             case '1':
@@ -84,7 +74,7 @@ public class JsonReader2 extends AbstractReader {
             case '7':
             case '8':
             case '9':
-                readNumber();
+                readNumberInternal();
                 break;
             default:
                 throw new JsonException("Unsupported json value: " + (char) current);
@@ -92,133 +82,52 @@ public class JsonReader2 extends AbstractReader {
     }
 
     private void readJsonObject() throws IOException {
-        JsonObject jsonObject = visitor.startObject();
+        listener.startObject();
 
-        readNext();
-        skipWhiteSpace();
+        readNextAndSkip();
 
         if (current == JSON_OBJECT_END) {
-            visitor.endObject(jsonObject);
-            readNext();
-            skipWhiteSpace();
+            listener.endObject();
+            readNextAndSkip();
             return;
         }
 
         do {
             skipWhiteSpace();
-            readNext();
-            skipWhiteSpace();
+            readNextAndSkip();
 
-            visitor.startObjectName(jsonObject);
+            listener.startObjectName();
             String name = readName();
-            visitor.endObjectName(jsonObject, name);
+            listener.endObjectName(name);
 
             isEqualsOrThrow(JSON_NAME_SEPARATOR);
             skipWhiteSpace();
 
-            visitor.startObjectValue(jsonObject, name);
+            listener.startObjectValue();
             readValue();
-            visitor.endObjectValue(jsonObject, name);
+            listener.endObjectValue();
             skipWhiteSpace();
-        } while (isEquals(JSON_VALUE_SEPARATOR));
+        } while (isElementSeparator());
 
         isEqualsOrThrow(JSON_OBJECT_END);
-        visitor.endObject(jsonObject);
+        listener.endObject();
     }
 
     private void readJsonArray() throws IOException {
-        JsonArray array = visitor.startArray();
+        listener.startArray();
 
         readNext();
         skipWhiteSpace();
         do {
             skipWhiteSpace();
-            visitor.startArrayElement(array);
+            listener.startArrayElement();
             readValue();
-            visitor.endArrayElement(array);
+            listener.endArrayElement();
             skipWhiteSpace();
-        } while (isEquals(JSON_VALUE_SEPARATOR));
+        } while (isElementSeparator());
 
         isEqualsOrThrow(JSON_ARRAY_END);
-        visitor.endArray(array);
-    }
-
-    /**
-     * 读取 json string value。读取完后会读下一个字符（跳过空白字符）。
-     */
-    private void readString() throws IOException {
-        readNext();
-
-        openValueBuffer();
-        visitor.startString();
-
-        //TODO 处理 "\"、"unicode"
-        while (current != JSON_QUOTATION_MARK && current != -1) {
-            readNext();
-        }
-        String value = closeValueBuffer();
-        visitor.endString(value);
-
-        readNext();
-        skipWhiteSpace();
-    }
-
-    /**
-     * 读取 json null value。读取完后会读取 {@code null} 的下一个字符（跳过空白字符）。
-     */
-    private void readNull() throws IOException {
-        visitor.startNull();
-        readNext();
-        isEqualsOrThrow('u');
-        isEqualsOrThrow('l');
-        isEqualsOrThrow('l');
-        visitor.endNull();
-
-        skipWhiteSpace();
-    }
-
-    /**
-     * 读取 json false value。读取完后会读取 {@code false} 的下一个字符（跳过空白字符）。
-     */
-    private void readFalse() throws IOException {
-        visitor.startBool();
-        readNext();
-        isEqualsOrThrow('a');
-        isEqualsOrThrow('l');
-        isEqualsOrThrow('s');
-        isEqualsOrThrow('e');
-        visitor.endBool(false);
-
-        skipWhiteSpace();
-    }
-
-    /**
-     * 读取 json true value。读取完后会读取 {@code true} 的下一个字符（跳过空白字符）。
-     */
-    private void readTrue() throws IOException {
-        visitor.startBool();
-        readNext();
-        isEqualsOrThrow('r');
-        isEqualsOrThrow('u');
-        isEqualsOrThrow('e');
-        visitor.endBool(true);
-
-        skipWhiteSpace();
-    }
-
-    /**
-     * 读取 json number value。读取完后会读取下一个字符（跳过空白字符）。
-     */
-    private void readNumber() throws IOException {
-        visitor.startNumber();
-        openValueBuffer();
-        while (current >= '0' && current <= '9') {
-            readNext();
-        }
-        String num = closeValueBuffer();
-        visitor.endNumber(num);
-
-        skipWhiteSpace();
+        listener.endArray();
     }
 
     /**
@@ -230,24 +139,15 @@ public class JsonReader2 extends AbstractReader {
             readNext();
         }
         String name = closeValueBuffer();
-        readNext();
-        skipWhiteSpace();
+        readNextAndSkip();
         return name;
     }
 
-    private void skipWhiteSpace() throws IOException {
-        while (isWhitespace()) {
-            readNext();
-        }
-    }
-
     /**
-     * 判断 {@code current} 与 {@code excepted} 是否相等，如果相等会读取下一个字符。
-     *
-     * @return 返回 {@code false},如果 {@code current == excepted}；返回 {@code true},{@code current != excepted}；
+     * 判断当前字符是否是 ","
      */
-    private boolean isEquals(char excepted) throws IOException {
-        if (current != excepted) {
+    private boolean isElementSeparator() throws IOException {
+        if (current != JsonCharacters.JSON_VALUE_SEPARATOR) {
             return false;
         }
 
@@ -255,15 +155,8 @@ public class JsonReader2 extends AbstractReader {
         return true;
     }
 
-    /**
-     * 判断 {@code current} 与 {@code expected} 是否相等，如果不相等抛出异常。
-     * 如果相等会读取下一个字符。
-     */
-    private void isEqualsOrThrow(char expected) throws IOException {
-        if (current != expected) {
-            throw new UnexpectedException(expected, current, line, column);
-        }
-
+    private void readNextAndSkip() throws IOException {
         readNext();
+        skipWhiteSpace();
     }
 }
